@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Interface</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .search-container {
+            margin-bottom: 20px;
+        }
+        #searchInput {
+            width: 70%;
+            padding: 10px;
+            font-size: 16px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        .results-container {
+            border: 1px solid #ddd;
+            padding: 20px;
+            min-height: 300px;
+        }
+        .result-item {
+            margin-bottom: 15px;
+            padding: 10px;
+            border-left: 4px solid #007bff;
+        }
+        .analysis {
+            background-color: #f8f9fa;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .expansion {
+            background-color: #e9ecef;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .semantics {
+            background-color: #dee2e6;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+        .error {
+            color: red;
+            padding: 10px;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="search-container">
+        <input type="text" id="searchInput" placeholder="Enter your search query...">
+        <button onclick="performSearch()">Search</button>
+    </div>
+    <div class="results-container" id="results"></div>
+
+    <script>
+        let eventSource = null;
+
+        function performSearch() {
+            const query = document.getElementById('searchInput').value;
+            if (!query) return;
+
+            // Close any existing connection
+            if (eventSource) {
+                eventSource.close();
+            }
+
+            // Clear previous results
+            document.getElementById('results').innerHTML = '';
+
+            // Create new SSE connection
+            eventSource = new EventSource(`/search?query=${encodeURIComponent(query)}`);
+
+            eventSource.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                const resultsDiv = document.getElementById('results');
+
+                switch(data.type) {
+                    case 'results':
+                        const resultItem = document.createElement('div');
+                        resultItem.className = 'result-item';
+                        resultItem.textContent = data.content;
+                        resultsDiv.appendChild(resultItem);
+                        break;
+                    case 'analysis':
+                        const analysisDiv = document.createElement('div');
+                        analysisDiv.className = 'analysis';
+                        analysisDiv.textContent = `Query Analysis: ${data.content}`;
+                        resultsDiv.appendChild(analysisDiv);
+                        break;
+                    case 'expansion':
+                        const expansionDiv = document.createElement('div');
+                        expansionDiv.className = 'expansion';
+                        expansionDiv.textContent = `Expanded Queries: ${data.content}`;
+                        resultsDiv.appendChild(expansionDiv);
+                        break;
+                    case 'semantics':
+                        const semanticsDiv = document.createElement('div');
+                        semanticsDiv.className = 'semantics';
+                        semanticsDiv.textContent = `Semantic Analysis: ${data.content}`;
+                        resultsDiv.appendChild(semanticsDiv);
+                        break;
+                    case 'error':
+                        const errorDiv = document.createElement('div');
+                        errorDiv.className = 'error';
+                        errorDiv.textContent = `Error: ${data.content}`;
+                        resultsDiv.appendChild(errorDiv);
+                        break;
+                    case 'complete':
+                        eventSource.close();
+                        break;
+                }
+            };
+
+            eventSource.onerror = function(error) {
+                console.error('EventSource failed:', error);
+                eventSource.close();
+            };
+        }
+
+        // Allow search on Enter key
+        document.getElementById('searchInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                performSearch();
+            }
+        });
+    </script>
+</body>
+</html> 
