@@ -4,7 +4,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
-from agents import build_multi_node_graph, AgentState, ChatOpenAI, ReasoningModel
+from agent_protocol import AgentProtocol, AgentMessage, AgentRole
+from specialized_agents import ResearchAgent, AnalysisAgent, FormattingAgent
 from typing import AsyncGenerator
 
 app = FastAPI()
@@ -21,99 +22,70 @@ app.add_middleware(
 # Mount static files
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Initialize the models
-llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
-reasoner = ReasoningModel(llm)
+# Initialize the agent protocol and register agents
+protocol = AgentProtocol()
+research_agent = ResearchAgent("researcher")
+analysis_agent = AnalysisAgent("analyzer")
+formatting_agent = FormattingAgent("formatter")
 
-async def process_node(state: AgentState, node_type: str, context: dict = None) -> str:
-    """Process a single node and return its result"""
-    try:
-        response = await asyncio.to_thread(
-            reasoner.reason,
-            node_type,
-            state.messages[-1]['content'] if state.messages else '',
-            context or {"task": f"{node_type}_task"}
-        )
-        return response
-    except Exception as e:
-        return f"Error in {node_type}: {str(e)}"
+protocol.register_agent("researcher", research_agent)
+protocol.register_agent("analyzer", analysis_agent)
+protocol.register_agent("formatter", formatting_agent)
 
 async def generate_search_events(query: str) -> AsyncGenerator[str, None]:
-    """Generate SSE events for the search process"""
+    """Generate SSE events for the search process using agent protocol"""
     try:
-        # Create initial state
-        state = AgentState(
-            messages=[
-                {"role": "user", "content": query}
-            ]
+        # Create initial user message
+        user_message = AgentMessage(
+            role=AgentRole.USER,
+            content=query,
+            metadata={"query_type": "search"}
         )
-
+        
         # Send starting event
-        yield f"data: {json.dumps({'type': 'status', 'content': 'Starting analysis...'})}\n\n"
-        await asyncio.sleep(0.1)  # Small delay for UI update
+        yield f'data: {json.dumps({"type": "status", "content": "I am analyzing your question to understand what you need..."})}\n\n'
+        await asyncio.sleep(0.1)
 
-        # Query Analysis
-        yield f"data: {json.dumps({'type': 'status', 'content': '🤔 Analyzing query...'})}\n\n"
-        analysis_result = await process_node(state, "analysis")
-        state.context["query_analysis"] = analysis_result
-        yield f"data: {json.dumps({'type': 'analysis', 'content': analysis_result})}\n\n"
-        await asyncio.sleep(0.2)  # Small delay between steps
-
-        # Query Expansion
-        yield f"data: {json.dumps({'type': 'status', 'content': '🔍 Expanding search terms...'})}\n\n"
-        expansion_result = await process_node(
-            state, 
-            "expansion",
-            {"task": "query_expansion", "analysis": analysis_result}
+        # Research phase
+        yield f'data: {json.dumps({"type": "status", "content": "I am searching for relevant information..."})}\n\n'
+        research_result = await protocol.send_message(
+            "user",
+            "researcher",
+            query,
+            {"research_type": "web_search"}
         )
-        state.context["expanded_queries"] = expansion_result
-        yield f"data: {json.dumps({'type': 'expansion', 'content': expansion_result})}\n\n"
+        yield f'data: {json.dumps({"type": "research", "content": research_result.content})}\n\n'
         await asyncio.sleep(0.2)
 
-        # Semantic Analysis
-        yield f"data: {json.dumps({'type': 'status', 'content': '🧠 Performing semantic analysis...'})}\n\n"
-        semantic_result = await process_node(
-            state,
-            "semantics",
-            {
-                "task": "semantic_analysis",
-                "analysis": analysis_result,
-                "expansion": expansion_result
-            }
+        # Analysis phase
+        yield f'data: {json.dumps({"type": "status", "content": "I am analyzing the information..."})}\n\n'
+        analysis_result = await protocol.send_message(
+            "researcher",
+            "analyzer",
+            research_result.content,
+            {"analysis_type": "comprehensive"}
         )
-        state.context["semantic_analysis"] = semantic_result
-        yield f"data: {json.dumps({'type': 'semantics', 'content': semantic_result})}\n\n"
+        yield f'data: {json.dumps({"type": "analysis", "content": analysis_result.content})}\n\n'
         await asyncio.sleep(0.2)
 
-        # Web Search
-        yield f"data: {json.dumps({'type': 'status', 'content': '🌐 Searching...'})}\n\n"
-        search_result = await process_node(
-            state,
-            "search",
-            {
-                "task": "web_search",
-                "analysis": analysis_result,
-                "expansion": expansion_result,
-                "semantics": semantic_result
-            }
+        # Formatting phase
+        yield f'data: {json.dumps({"type": "status", "content": "I am formatting the results..."})}\n\n'
+        formatted_result = await protocol.send_message(
+            "analyzer",
+            "formatter",
+            analysis_result.content,
+            {"format_type": "markdown"}
         )
         
-        # Add search results to state
-        state.messages.append({
-            "role": "assistant",
-            "content": f"Search Results:\n\n{search_result}"
-        })
-        state.context["search_results"] = search_result
-        
-        # Send search results
-        yield f"data: {json.dumps({'type': 'results', 'content': search_result})}\n\n"
+        # Send final results
+        yield f'data: {json.dumps({"type": "results", "content": formatted_result.content})}\n\n'
         await asyncio.sleep(0.2)
 
         # Send completion event
-        yield f"data: {json.dumps({'type': 'complete', 'content': 'Search completed'})}\n\n"
+        yield f'data: {json.dumps({"type": "complete", "content": "I have completed my search and prepared a response for you!"})}\n\n'
 
     except Exception as e:
-        yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+        yield f'data: {json.dumps({"type": "error", "content": f"Sorry, I encountered an error while processing your request: {str(e)}"})}\n\n'
 
 @app.get("/search")
 async def search(request: Request, query: str):

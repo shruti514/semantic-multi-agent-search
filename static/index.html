@@ -7,17 +7,23 @@
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 800px;
-            margin: 0 auto;
-            padding: 20px;
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
         }
         .search-container {
-            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
         }
         #searchInput {
             width: 70%;
             padding: 10px;
             font-size: 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
         }
         button {
             padding: 10px 20px;
@@ -25,40 +31,101 @@
             background-color: #007bff;
             color: white;
             border: none;
+            border-radius: 4px;
             cursor: pointer;
+            margin-left: 10px;
         }
         button:hover {
             background-color: #0056b3;
         }
-        .results-container {
-            border: 1px solid #ddd;
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        .left-pane {
+            flex: 1;
             padding: 20px;
-            min-height: 300px;
+            overflow-y: auto;
+            border-right: 1px solid #dee2e6;
+            background: #fff;
         }
-        .result-item {
-            margin-bottom: 15px;
-            padding: 10px;
-            border-left: 4px solid #007bff;
+        .right-pane {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
         }
-        .analysis {
-            background-color: #f8f9fa;
-            padding: 10px;
-            margin-bottom: 10px;
+        .thinking-state {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #e9ecef;
+            border-radius: 4px;
+            text-align: center;
         }
-        .expansion {
-            background-color: #e9ecef;
-            padding: 10px;
-            margin-bottom: 10px;
+        .thinking-state h3 {
+            margin: 0;
+            color: #495057;
         }
-        .semantics {
-            background-color: #dee2e6;
-            padding: 10px;
-            margin-bottom: 10px;
+        .result-content {
+            margin-top: 20px;
         }
-        .error {
-            color: red;
-            padding: 10px;
-            margin-bottom: 10px;
+        .result-content pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .markdown-content {
+            margin-top: 20px;
+        }
+        .markdown-content h1, .markdown-content h2, .markdown-content h3 {
+            color: #212529;
+            margin-top: 20px;
+        }
+        .markdown-content p {
+            line-height: 1.6;
+            color: #495057;
+        }
+        .markdown-content code {
+            background: #f8f9fa;
+            padding: 2px 4px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .markdown-content pre {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 4px;
+            overflow-x: auto;
+        }
+        .markdown-content blockquote {
+            border-left: 4px solid #dee2e6;
+            padding-left: 20px;
+            margin: 20px 0;
+            color: #6c757d;
+        }
+        .markdown-content ul, .markdown-content ol {
+            padding-left: 20px;
+        }
+        .markdown-content li {
+            margin: 10px 0;
+        }
+        .intent-badge {
+            display: inline-block;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 14px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .quick-links {
+            background-color: #e3f2fd;
+            color: #1976d2;
+        }
+        .detailed-answer {
+            background-color: #f3e5f5;
+            color: #7b1fa2;
         }
     </style>
 </head>
@@ -67,7 +134,17 @@
         <input type="text" id="searchInput" placeholder="Enter your search query...">
         <button onclick="performSearch()">Search</button>
     </div>
-    <div class="results-container" id="results"></div>
+    <div class="main-container">
+        <div class="left-pane" id="leftPane">
+            <div class="thinking-state" id="thinkingState">
+                <h3>Ready to search</h3>
+            </div>
+            <div class="result-content" id="resultContent"></div>
+        </div>
+        <div class="right-pane" id="rightPane">
+            <div id="detailedReasoning"></div>
+        </div>
+    </div>
 
     <script>
         let eventSource = null;
@@ -82,47 +159,74 @@
             }
 
             // Clear previous results
-            document.getElementById('results').innerHTML = '';
+            document.getElementById('resultContent').innerHTML = '';
+            document.getElementById('detailedReasoning').innerHTML = '';
+            document.getElementById('thinkingState').innerHTML = '<h3>Ready to search</h3>';
 
             // Create new SSE connection
             eventSource = new EventSource(`/search?query=${encodeURIComponent(query)}`);
 
             eventSource.onmessage = function(event) {
                 const data = JSON.parse(event.data);
-                const resultsDiv = document.getElementById('results');
+                const thinkingState = document.getElementById('thinkingState');
+                const resultContent = document.getElementById('resultContent');
+                const detailedReasoning = document.getElementById('detailedReasoning');
 
                 switch(data.type) {
-                    case 'results':
-                        const resultItem = document.createElement('div');
-                        resultItem.className = 'result-item';
-                        resultItem.textContent = data.content;
-                        resultsDiv.appendChild(resultItem);
+                    case 'status':
+                        thinkingState.innerHTML = `<h3>${data.content}</h3>`;
+                        break;
+                    case 'intent':
+                        const intentClass = data.content.toLowerCase().includes('quick links') ? 'quick-links' : 'detailed-answer';
+                        const intentText = data.content.toLowerCase().includes('quick links') ? 'Quick Links' : 'Detailed Answer';
+                        thinkingState.innerHTML = `
+                            <h3>Intent Detected: 
+                                <span class="intent-badge ${intentClass}">${intentText}</span>
+                            </h3>
+                        `;
+                        detailedReasoning.innerHTML += `
+                            <div class="intent">
+                                <h3>Intent Analysis</h3>
+                                <pre>${data.content}</pre>
+                            </div>
+                        `;
                         break;
                     case 'analysis':
-                        const analysisDiv = document.createElement('div');
-                        analysisDiv.className = 'analysis';
-                        analysisDiv.textContent = `Query Analysis: ${data.content}`;
-                        resultsDiv.appendChild(analysisDiv);
+                        detailedReasoning.innerHTML += `
+                            <div class="analysis">
+                                <h3>Query Analysis</h3>
+                                <pre>${data.content}</pre>
+                            </div>
+                        `;
                         break;
                     case 'expansion':
-                        const expansionDiv = document.createElement('div');
-                        expansionDiv.className = 'expansion';
-                        expansionDiv.textContent = `Expanded Queries: ${data.content}`;
-                        resultsDiv.appendChild(expansionDiv);
+                        detailedReasoning.innerHTML += `
+                            <div class="expansion">
+                                <h3>Query Expansion</h3>
+                                <pre>${data.content}</pre>
+                            </div>
+                        `;
                         break;
                     case 'semantics':
-                        const semanticsDiv = document.createElement('div');
-                        semanticsDiv.className = 'semantics';
-                        semanticsDiv.textContent = `Semantic Analysis: ${data.content}`;
-                        resultsDiv.appendChild(semanticsDiv);
+                        detailedReasoning.innerHTML += `
+                            <div class="semantics">
+                                <h3>Semantic Analysis</h3>
+                                <pre>${data.content}</pre>
+                            </div>
+                        `;
+                        break;
+                    case 'results':
+                        resultContent.innerHTML = `
+                            <div class="markdown-content">
+                                ${marked.parse(data.content)}
+                            </div>
+                        `;
                         break;
                     case 'error':
-                        const errorDiv = document.createElement('div');
-                        errorDiv.className = 'error';
-                        errorDiv.textContent = `Error: ${data.content}`;
-                        resultsDiv.appendChild(errorDiv);
+                        thinkingState.innerHTML = `<h3 style="color: red;">Error: ${data.content}</h3>`;
                         break;
                     case 'complete':
+                        thinkingState.innerHTML = '<h3>Search completed</h3>';
                         eventSource.close();
                         break;
                 }
@@ -141,5 +245,6 @@
             }
         });
     </script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </body>
 </html> 
