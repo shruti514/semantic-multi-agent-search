@@ -2,6 +2,8 @@ from typing import Dict, List, Any, Optional
 from pydantic import BaseModel, Field
 from enum import Enum
 import json
+import time
+import uuid
 
 class AgentRole(str, Enum):
     """Standardized roles for agents in the protocol"""

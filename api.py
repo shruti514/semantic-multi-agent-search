@@ -1,12 +1,20 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import asyncio
 import json
+import time
+import uuid
 from agent_protocol import AgentProtocol, AgentMessage, AgentRole
 from specialized_agents import ResearchAgent, AnalysisAgent, FormattingAgent
 from typing import AsyncGenerator
+import logging
+import os
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 app = FastAPI()
 
@@ -23,82 +31,71 @@ app.add_middleware(
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # Initialize the agent protocol and register agents
+logger.debug("Initializing agents")
 protocol = AgentProtocol()
-research_agent = ResearchAgent("researcher")
-analysis_agent = AnalysisAgent("analyzer")
-formatting_agent = FormattingAgent("formatter")
+research_agent = ResearchAgent("research-1")
+analysis_agent = AnalysisAgent("analysis-1")
+formatting_agent = FormattingAgent("formatting-1")
 
 protocol.register_agent("researcher", research_agent)
 protocol.register_agent("analyzer", analysis_agent)
 protocol.register_agent("formatter", formatting_agent)
+logger.debug("Agents initialized and registered")
 
-async def generate_search_events(query: str) -> AsyncGenerator[str, None]:
-    """Generate SSE events for the search process using agent protocol"""
+async def generate_search_events(query: str):
+    """Generate SSE events for the search process"""
     try:
-        # Create initial user message
-        user_message = AgentMessage(
+        # Research phase
+        logger.debug("Starting research phase")
+        research_message = AgentMessage(
             role=AgentRole.USER,
             content=query,
-            metadata={"query_type": "search"}
+            metadata={"research_type": "semantic_search"}
         )
-        
-        # Send starting event
-        yield f'data: {json.dumps({"type": "status", "content": "I am analyzing your question to understand what you need..."})}\n\n'
-        await asyncio.sleep(0.1)
-
-        # Research phase
-        yield f'data: {json.dumps({"type": "status", "content": "I am searching for relevant information..."})}\n\n'
-        research_result = await protocol.send_message(
-            "user",
-            "researcher",
-            query,
-            {"research_type": "web_search"}
-        )
-        yield f'data: {json.dumps({"type": "research", "content": research_result.content})}\n\n'
-        await asyncio.sleep(0.2)
+        research_result = await research_agent.process_message(research_message)
+        yield f"data: {json.dumps({'phase': 'research', 'content': research_result.content, 'reasoning': research_result.metadata.get('reasoning', 'Research completed')})}\n\n"
+        logger.debug("Research phase completed")
 
         # Analysis phase
-        yield f'data: {json.dumps({"type": "status", "content": "I am analyzing the information..."})}\n\n'
-        analysis_result = await protocol.send_message(
-            "researcher",
-            "analyzer",
-            research_result.content,
-            {"analysis_type": "comprehensive"}
+        logger.debug("Starting analysis phase")
+        analysis_message = AgentMessage(
+            role=AgentRole.RESEARCHER,
+            content=research_result.content,
+            metadata={"analysis_type": "comprehensive"}
         )
-        yield f'data: {json.dumps({"type": "analysis", "content": analysis_result.content})}\n\n'
-        await asyncio.sleep(0.2)
+        analysis_result = await analysis_agent.process_message(analysis_message)
+        yield f"data: {json.dumps({'phase': 'analysis', 'content': analysis_result.content, 'reasoning': analysis_result.metadata.get('reasoning', 'Analysis completed')})}\n\n"
+        logger.debug("Analysis phase completed")
 
         # Formatting phase
-        yield f'data: {json.dumps({"type": "status", "content": "I am formatting the results..."})}\n\n'
-        formatted_result = await protocol.send_message(
-            "analyzer",
-            "formatter",
-            analysis_result.content,
-            {"format_type": "markdown"}
+        logger.debug("Starting formatting phase")
+        formatting_message = AgentMessage(
+            role=AgentRole.ANALYZER,
+            content=analysis_result.content,
+            metadata={"format_type": "markdown"}
         )
-        
-        # Send final results
-        yield f'data: {json.dumps({"type": "results", "content": formatted_result.content})}\n\n'
-        await asyncio.sleep(0.2)
-
-        # Send completion event
-        yield f'data: {json.dumps({"type": "complete", "content": "I have completed my search and prepared a response for you!"})}\n\n'
+        formatting_result = await formatting_agent.process_message(formatting_message)
+        yield f"data: {json.dumps({'phase': 'formatting', 'content': formatting_result.content, 'reasoning': formatting_result.metadata.get('reasoning', 'Formatting completed')})}\n\n"
+        logger.debug("Formatting phase completed")
 
     except Exception as e:
-        yield f'data: {json.dumps({"type": "error", "content": f"Sorry, I encountered an error while processing your request: {str(e)}"})}\n\n'
+        logger.error(f"Error in search process: {str(e)}")
+        yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+@app.get("/")
+async def read_root():
+    """Serve the main page"""
+    logger.debug("Serving main page")
+    return FileResponse("static/index.html")
 
 @app.get("/search")
-async def search(request: Request, query: str):
-    """SSE endpoint for search functionality"""
+async def search(query: str):
+    """Handle search requests"""
+    logger.debug(f"Received search query: {query}")
     return StreamingResponse(
         generate_search_events(query),
         media_type="text/event-stream"
     )
-
-@app.get("/")
-async def root():
-    """Serve the main page"""
-    return FileResponse("static/index.html")
 
 if __name__ == "__main__":
     import uvicorn
