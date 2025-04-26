@@ -128,15 +128,25 @@
         .thinking {
             animation: pulse 1.5s infinite;
         }
+        textarea {
+            width: 100%;
+            min-height: 120px;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            resize: vertical;
+            font-family: inherit;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="left-panel">
             <div class="search-box">
-                <input type="text" id="searchInput" placeholder="Enter your search query..." onkeypress="handleKeyPress(event)">
-                <button onclick="performSearch()">Search</button>
+                <textarea id="searchInput" placeholder="Enter your search query here..."></textarea>
             </div>
+            <button onclick="performSearch()">Search</button>
             <div class="thinking-state" id="thinkingState" style="display: none;">
                 <h3>Processing: <span class="phase" id="currentPhase">Initializing</span></h3>
             </div>

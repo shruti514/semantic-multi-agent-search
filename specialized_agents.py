@@ -87,15 +87,30 @@ class ResearchAgent(BaseAgent):
         logger.debug("ResearchAgent response created")
         return response
     
-    async def _expand_query(self, query: str) -> Dict[str, Any]:
+    async def _expand_query(self, query: str) -> List[str]:
         """Expand the query into multiple semantic variations"""
         logger.debug(f"Expanding query: {query}")
         chain = self.query_expansion_prompt | self.llm | JsonOutputParser()
         result = await chain.ainvoke({"query": query})
         logger.debug(f"Query expansion result: {result}")
-        return result
+        
+        # Extract variations from the result
+        if isinstance(result, dict) and "variations" in result:
+            variations = result["variations"]
+        elif isinstance(result, list):
+            variations = result
+        else:
+            # Generic fallback variations
+            variations = [
+                f"{query} overview and background",
+                f"{query} key aspects and features",
+                f"{query} impact and significance",
+                f"{query} current status and developments"
+            ]
+        
+        return variations
     
-    async def _conduct_search(self, query: str, aspect: str) -> Dict[str, Any]:
+    async def _conduct_search(self, query: str, aspect: str) -> str:
         """Conduct a search for a specific aspect of the query"""
         logger.debug(f"Conducting search for aspect: {aspect}")
         chain = self.search_prompt | self.llm
@@ -125,7 +140,7 @@ class ResearchAgent(BaseAgent):
             input_variables=["query", "results"]
         )
         chain = ranking_prompt | self.llm
-        combined_results = "\n\n".join(results)
+        combined_results = "\n\n".join([f"Result {i+1}:\n{result}" for i, result in enumerate(results)])
         ranked_result = await chain.ainvoke({
             "query": original_query,
             "results": combined_results
